@@ -1,3 +1,5 @@
+import os
+
 import torch
 import torch_pruning as tp
 import pytorch_lightning as pl
@@ -116,7 +118,9 @@ export_onnx(onnx_model, example_inputs, MODEL_NAME.lower())
 trainer.test(lit_test, test_loader)
 wandb.finish()
 
-# Pruning
+# Pruning (run only on rank 0 to avoid duplicate work in multi-GPU setup)
+local_rank = int(os.environ.get("LOCAL_RANK", 0))
+
 if MODEL_ENCODER.lower() == "convnext":
     backbone, feature_info = get_convnext_features_backbone(MODEL_NAME, in_chans=IN_CHANS, pretrained=True)
     lit_prune = LitDinoModule.load_from_checkpoint(
@@ -137,25 +141,32 @@ model.eval().cpu()
 for p in model.parameters():
     p.requires_grad = True
 
-imp = tp.importance.GroupMagnitudeImportance(p=2)  # L2 over grouped weights
-ignored_layers = [
-    model.seg_head,
-]
+if local_rank == 0:
+    imp = tp.importance.GroupMagnitudeImportance(p=2)  # L2 over grouped weights
+    ignored_layers = [
+        model.seg_head,
+    ]
 
-# Pruner (global + isomorphic) with configurable pruning ratio and channel rounding
-pruner = tp.pruner.BasePruner(
-    model,
-    example_inputs,
-    importance=imp,
-    global_pruning=True,
-    isomorphic=True,
-    pruning_ratio=PRUNING_RATIO,
-    ignored_layers=ignored_layers,
-    round_to=ROUND_TO,
-)
+    # For ViT: ignore attention layers to keep embed_dim consistent
+    if MODEL_ENCODER.lower() == "vit":
+        for m in model.modules():
+            if m.__class__.__name__ == "EvaAttention":
+                ignored_layers += [m.qkv, m.proj]
 
-pruner.step()  # Prune the graph
-log_macs_params(model, example_inputs, prune_logger)
+    # Pruner (global + isomorphic) with configurable pruning ratio and channel rounding
+    pruner = tp.pruner.BasePruner(
+        model,
+        example_inputs,
+        importance=imp,
+        global_pruning=True,
+        isomorphic=True,
+        pruning_ratio=PRUNING_RATIO,
+        ignored_layers=ignored_layers,
+        round_to=ROUND_TO,
+    )
+
+    pruner.step()  # Prune the graph
+    log_macs_params(model, example_inputs, prune_logger)
 
 # Put the pruned module back (gradients already enabled for fine-tuning)
 lit_prune.model = model
@@ -167,7 +178,6 @@ trainer = pl.Trainer(
     devices=-1,
     precision=32,
     gradient_clip_val=1.0,
-    strategy="ddp_find_unused_parameters_true",
     callbacks=get_callbacks(model_name=MODEL_NAME, max_epochs=MAX_EPOCHS, mode="prune"),
     logger=prune_logger,
 )

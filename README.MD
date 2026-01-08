@@ -68,8 +68,8 @@ The following DINOv3 models are available via timm:
 - `convnext_base.dinov3_lvd1689m`
 
 **ViT variants** (use with `MODEL_ENCODER = vit`):
-- `vit_small_patch16_dinov3.sat493m`
-- `vit_base_patch16_dinov3.sat493m`
+- `vit_small_patch16_dinov3.lvd1689m`
+- `vit_base_patch16_dinov3.lvd1689m`
 
 To see all available DINOv3 models in timm, run:
 ```python
