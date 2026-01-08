@@ -52,6 +52,10 @@ MODEL_NAME = convnext_base.dinov3_lvd1689m
 BATCH_SIZE = 8
 LR = 0.005
 MAX_EPOCHS = 200
+
+[PRUNING]
+PRUNING_RATIO = 0.30  # 30% of weights removed (~50% param reduction)
+ROUND_TO = 8          # Channel rounding for Jetson/TensorRT
 ```
 
 ### Available DINOv3 Models
@@ -62,13 +66,10 @@ The following DINOv3 models are available via timm:
 - `convnext_tiny.dinov3_lvd1689m`
 - `convnext_small.dinov3_lvd1689m`
 - `convnext_base.dinov3_lvd1689m`
-- `convnext_large.dinov3_lvd1689m`
 
 **ViT variants** (use with `MODEL_ENCODER = vit`):
 - `vit_small_patch16_dinov3.sat493m`
 - `vit_base_patch16_dinov3.sat493m`
-- `vit_large_patch16_dinov3.sat493m`
-- `vit_7b_patch16_dinov3.lvd1689m`
 
 To see all available DINOv3 models in timm, run:
 ```python

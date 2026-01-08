@@ -36,6 +36,8 @@ LOSS_TVERSKY = cfg["LOSS"]["TVERSKY"]
 LOSS_LOVASZ = cfg["LOSS"]["LOVASZ"]
 LOSS_FOCAL = cfg["LOSS"]["FOCAL"]
 LOSS_IGNORE_INDEX = cfg["LOSS"]["IGNORE_INDEX"]
+PRUNING_RATIO = cfg["PRUNING"]["PRUNING_RATIO"]
+ROUND_TO = cfg["PRUNING"]["ROUND_TO"]
 WANDB_OFFLINE = cfg['WANDB']['OFFLINE']
 PROJECT_NAME = cfg['WANDB']['PROJECT_NAME']
 
@@ -134,16 +136,16 @@ ignored_layers = [
     model.seg_head,
 ]
 
-# Pruner (global + isomorphic) and channels round to 8 for Jetson/TensorRT
+# Pruner (global + isomorphic) with configurable pruning ratio and channel rounding
 pruner = tp.pruner.BasePruner(
     model,
     example_inputs,
     importance=imp,
     global_pruning=True,
     isomorphic=True,
-    pruning_ratio=0.30,  # approx. 50% param reduction due to bidirectional coupling
+    pruning_ratio=PRUNING_RATIO,
     ignored_layers=ignored_layers,
-    round_to=8,  # Jetson/TensorRT friendly
+    round_to=ROUND_TO,
 )
 
 pruner.step()  # Prune the graph

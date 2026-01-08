@@ -10,7 +10,7 @@ def get_backbone(model_name: str, in_chans: int = 1, pretrained: bool = True):
 
     Args:
         model_name: timm model name (e.g., 'convnext_base.dinov3_lvd1689m',
-                    'vit_large_patch16_dinov3.sat493m')
+                    'vit_base_patch16_dinov3.sat493m')
         in_chans: Number of input channels (default: 1 for grayscale thermal images).
                   timm automatically adapts the model's input layer.
         pretrained: Whether to load pretrained weights (default: True)
@@ -23,13 +23,10 @@ def get_backbone(model_name: str, in_chans: int = 1, pretrained: bool = True):
             - convnext_tiny.dinov3_lvd1689m
             - convnext_small.dinov3_lvd1689m
             - convnext_base.dinov3_lvd1689m
-            - convnext_large.dinov3_lvd1689m
 
         ViT variants:
             - vit_small_patch16_dinov3.sat493m
             - vit_base_patch16_dinov3.sat493m
-            - vit_large_patch16_dinov3.sat493m
-            - vit_7b_patch16_dinov3.lvd1689m
 
     Note:
         Use `timm.list_models('*dinov3*')` to see all available DINOv3 models.
@@ -74,7 +71,7 @@ def get_vit_backbone(model_name: str, in_chans: int = 1, pretrained: bool = True
     For ViT models, use forward_intermediates() to get intermediate layer features.
 
     Args:
-        model_name: timm ViT model name (e.g., 'vit_large_patch16_dinov3.sat493m')
+        model_name: timm ViT model name (e.g., 'vit_base_patch16_dinov3.sat493m')
         in_chans: Number of input channels (default: 1 for grayscale thermal images)
         pretrained: Whether to load pretrained weights (default: True)
 
