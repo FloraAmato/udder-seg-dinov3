@@ -6,7 +6,7 @@ import wandb
 from src.callbacks import get_callbacks
 from src.config import get_config
 from src.dataloaders import get_dataloaders
-from src.dinov3_backbone import get_backbone    
+from src.dinov3_backbone import get_convnext_features_backbone, get_vit_backbone
 from src.lit_dino import LitDinoModule
 from src.logger import get_loggers, log_macs_params
 from src.loss import get_segmentation_loss
@@ -16,17 +16,15 @@ from src.onnx_export import export_onnx
 # Get config
 cfg = get_config()
 SEED = cfg["GENERAL"]["SEED"]
-DINOV3_REPO_SOURCE = cfg["GENERAL"]["DINOV3_REPO_SOURCE"]
-DINOV3_REPO_LOCATION = cfg["GENERAL"]["DINOV3_REPO_LOCATION"]
+IN_CHANS = cfg["GENERAL"]["IN_CHANS"]
 MODEL_ENCODER = cfg["MODEL"]["MODEL_ENCODER"]
 MODEL_NAME = cfg["MODEL"]["MODEL_NAME"]
-MODEL_WEIGHTS = cfg["MODEL"]["MODEL_WEIGHTS"]
 TRAIN_IMAGES = cfg["DATA"]["TRAIN_IMAGES"]
-TRAIN_MASKS  = cfg["DATA"]["TRAIN_MASKS"]
-VAL_IMAGES   = cfg["DATA"]["VAL_IMAGES"]
-VAL_MASKS    = cfg["DATA"]["VAL_MASKS"]
-TEST_IMAGES  = cfg["DATA"]["TEST_IMAGES"]
-TEST_MASKS   = cfg["DATA"]["TEST_MASKS"]
+TRAIN_MASKS = cfg["DATA"]["TRAIN_MASKS"]
+VAL_IMAGES = cfg["DATA"]["VAL_IMAGES"]
+VAL_MASKS = cfg["DATA"]["VAL_MASKS"]
+TEST_IMAGES = cfg["DATA"]["TEST_IMAGES"]
+TEST_MASKS = cfg["DATA"]["TEST_MASKS"]
 BATCH_SIZE = cfg["TRAINING"]["BATCH_SIZE"]
 MAX_EPOCHS = cfg["TRAINING"]["MAX_EPOCHS"]
 LR = cfg["TRAINING"]["LR"]
@@ -48,7 +46,7 @@ train_logger, prune_logger = get_loggers(
     model_name=MODEL_NAME,
     project_name=PROJECT_NAME,
     wandb_offline=WANDB_OFFLINE
-    )
+)
 
 trainer = pl.Trainer(
     max_epochs=MAX_EPOCHS,
@@ -67,18 +65,49 @@ train_loader, val_loader, test_loader = get_dataloaders(
     BATCH_SIZE
 )
 
-# Training loop
+# Load backbone from timm (weights are automatically downloaded)
+# timm handles input channels natively via the in_chans parameter
 loss = get_segmentation_loss(LOSS_BCE, LOSS_DICE, LOSS_TVERSKY, LOSS_LOVASZ, LOSS_FOCAL, ignore_index=LOSS_IGNORE_INDEX)
-backbone = get_backbone(DINOV3_REPO_SOURCE, DINOV3_REPO_LOCATION, MODEL_NAME, MODEL_WEIGHTS)
-lit_train = LitDinoModule(backbone, encoder=MODEL_ENCODER, loss=loss, lr=LR, weight_decay=WEIGHT_DECAY, warmup_ratio=WARMPUP_RATIO, freeze_backbone=True)
+
+if MODEL_ENCODER.lower() == "convnext":
+    # ConvNeXt: use features_only mode for multi-scale feature extraction
+    backbone, feature_info = get_convnext_features_backbone(MODEL_NAME, in_chans=IN_CHANS, pretrained=True)
+    lit_train = LitDinoModule(
+        backbone, encoder=MODEL_ENCODER, loss=loss, feature_info=feature_info,
+        lr=LR, weight_decay=WEIGHT_DECAY, warmup_ratio=WARMPUP_RATIO, freeze_backbone=True
+    )
+elif MODEL_ENCODER.lower() == "vit":
+    # ViT: use standard model with forward_intermediates() for feature extraction
+    backbone = get_vit_backbone(MODEL_NAME, in_chans=IN_CHANS, pretrained=True)
+    feature_info = None
+    lit_train = LitDinoModule(
+        backbone, encoder=MODEL_ENCODER, loss=loss, feature_info=feature_info,
+        lr=LR, weight_decay=WEIGHT_DECAY, warmup_ratio=WARMPUP_RATIO, freeze_backbone=True
+    )
+else:
+    raise ValueError(f"Unknown encoder: {MODEL_ENCODER}. Use 'convnext' or 'vit'.")
+
+# Training loop
 trainer.fit(lit_train, train_loader, val_loader)
-example_inputs = torch.randn(1, 1, 480, 640)
+example_inputs = torch.randn(1, IN_CHANS, 480, 640)
 log_macs_params(lit_train.model, example_inputs, train_logger)
 
 # Testing loop
 ckpt_cb = trainer.checkpoint_callback
 best_ckpt = ckpt_cb.best_model_path
-lit_test = LitDinoModule.load_from_checkpoint(best_ckpt, encoder=MODEL_ENCODER, backbone=backbone, loss=loss)
+
+# Reload model for testing
+if MODEL_ENCODER.lower() == "convnext":
+    backbone, feature_info = get_convnext_features_backbone(MODEL_NAME, in_chans=IN_CHANS, pretrained=True)
+    lit_test = LitDinoModule.load_from_checkpoint(
+        best_ckpt, encoder=MODEL_ENCODER, backbone=backbone, feature_info=feature_info, loss=loss
+    )
+else:
+    backbone = get_vit_backbone(MODEL_NAME, in_chans=IN_CHANS, pretrained=True)
+    lit_test = LitDinoModule.load_from_checkpoint(
+        best_ckpt, encoder=MODEL_ENCODER, backbone=backbone, feature_info=None, loss=loss
+    )
+
 torch.save(lit_test.model.state_dict(), f"checkpoints/{MODEL_NAME.lower()}/best.pt")
 onnx_model = lit_test.model.cpu()
 export_onnx(onnx_model, example_inputs, MODEL_NAME.lower())
@@ -86,13 +115,22 @@ trainer.test(lit_test, test_loader)
 wandb.finish()
 
 # Pruning
-lit_prune = LitDinoModule.load_from_checkpoint(best_ckpt, encoder=MODEL_ENCODER, backbone=backbone, loss=loss)
+if MODEL_ENCODER.lower() == "convnext":
+    backbone, feature_info = get_convnext_features_backbone(MODEL_NAME, in_chans=IN_CHANS, pretrained=True)
+    lit_prune = LitDinoModule.load_from_checkpoint(
+        best_ckpt, encoder=MODEL_ENCODER, backbone=backbone, feature_info=feature_info, loss=loss
+    )
+else:
+    backbone = get_vit_backbone(MODEL_NAME, in_chans=IN_CHANS, pretrained=True)
+    lit_prune = LitDinoModule.load_from_checkpoint(
+        best_ckpt, encoder=MODEL_ENCODER, backbone=backbone, feature_info=None, loss=loss
+    )
+
 model = lit_prune.model
 model.eval().cpu()
 
 imp = tp.importance.GroupMagnitudeImportance(p=2)  # L2 over grouped weights
 ignored_layers = [
-    model.encoder.input_adapter.proj,
     model.seg_head,
 ]
 
@@ -103,12 +141,12 @@ pruner = tp.pruner.BasePruner(
     importance=imp,
     global_pruning=True,
     isomorphic=True,
-    pruning_ratio=0.30, # approx. 50% param reduction due to bidirectional coupling
+    pruning_ratio=0.30,  # approx. 50% param reduction due to bidirectional coupling
     ignored_layers=ignored_layers,
-    round_to=8, # Jetson/TensorRT friendly
+    round_to=8,  # Jetson/TensorRT friendly
 )
 
-pruner.step() # Prune the graph
+pruner.step()  # Prune the graph
 log_macs_params(model, example_inputs, prune_logger)
 
 # Put the pruned module back; unfreeze to fine-tune everything

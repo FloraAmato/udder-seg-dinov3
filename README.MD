@@ -21,7 +21,7 @@ Ensure you have installed the required dependencies:
 pip install -r requirements.txt
 ```
 
-Finally, ensure you have the DINOv3 backbone weights in the `backbones` folder. You can request the DINOv3 weights on the official [`Meta website`](https://ai.meta.com/resources/models-and-libraries/dinov3-downloads/).
+**Note:** DINOv3 backbone weights are automatically downloaded from [Hugging Face Hub](https://huggingface.co/collections/timm/timm-dinov3) via the [timm](https://github.com/huggingface/pytorch-image-models) library. No manual weight download is required!
 
 ### Running the Script
 
@@ -40,15 +40,45 @@ The script uses several parameters defined in the [`config.ini`](config.ini) fil
 Below is a snippet of the structure of the file:
 
 ```ini
+[GENERAL]
+SEED = 42
+IN_CHANS = 1  # Input channels (1 for grayscale thermal images)
+
+[MODEL]
+MODEL_ENCODER = convnext
+MODEL_NAME = convnext_base.dinov3_lvd1689m
+
 [TRAINING]
-batch_size = 32
-learning_rate = 0.001
-epochs = 50
+BATCH_SIZE = 8
+LR = 0.005
+MAX_EPOCHS = 200
 ```
 
-- **`batch_size`**: Number of samples per batch during training.
-- **`learning_rate`**: Learning rate for the optimizer.
-- **`epochs`**: Total number of training epochs.
+### Available DINOv3 Models
+
+The following DINOv3 models are available via timm:
+
+**ConvNeXt variants** (use with `MODEL_ENCODER = convnext`):
+- `convnext_tiny.dinov3_lvd1689m`
+- `convnext_small.dinov3_lvd1689m`
+- `convnext_base.dinov3_lvd1689m`
+- `convnext_large.dinov3_lvd1689m`
+
+**ViT variants** (use with `MODEL_ENCODER = vit`):
+- `vit_small_patch16_dinov3.sat493m`
+- `vit_base_patch16_dinov3.sat493m`
+- `vit_large_patch16_dinov3.sat493m`
+- `vit_7b_patch16_dinov3.lvd1689m`
+
+To see all available DINOv3 models in timm, run:
+```python
+import timm
+print(timm.list_models('*dinov3*'))
+```
+
+### Input Channel Handling
+
+timm handles input channels natively via the `in_chans` parameter. Simply set `IN_CHANS = 1` in the config file for grayscale thermal images - no external input adapters are needed. timm automatically adapts the first convolutional layer when `in_chans != 3`.
 
 Modify these values and the others as needed to suit your dataset and hardware.
 

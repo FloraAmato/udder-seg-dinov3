@@ -7,16 +7,30 @@ from .loss import WeightedSumLoss
 
 
 class LitDinoModule(pl.LightningModule):
-    def __init__(self, backbone, encoder: str, loss: WeightedSumLoss, freeze_backbone=True, lr=4e-3, weight_decay=5e-2, warmup_ratio = 0.05):
+    def __init__(
+        self,
+        backbone,
+        encoder: str,
+        loss: WeightedSumLoss,
+        feature_info=None,  # Required for ConvNeXt (from timm's backbone.feature_info)
+        freeze_backbone=True,
+        lr=4e-3,
+        weight_decay=5e-2,
+        warmup_ratio=0.05
+    ):
         assert encoder.lower() in ["convnext", "vit"], "Only convnext and vit encoders are supported"
         super().__init__()
         self.encoder = encoder.lower()
+
         if encoder == "convnext":
-            from convnext_fpn import DinoConvNeXtFPN
-            self.model = DinoConvNeXtFPN(backbone, use_input_adapter=True)
+            from .convnext_fpn import DinoConvNeXtFPN
+            if feature_info is None:
+                raise ValueError("feature_info is required for ConvNeXt encoder (from timm's backbone.feature_info)")
+            self.model = DinoConvNeXtFPN(backbone, feature_info)
         elif encoder == "vit":
-            from vit_dpt import DinoViTDPT
-            self.model = DinoViTDPT(backbone, use_input_adapter=True)
+            from .vit_dpt import DinoViTDPT
+            self.model = DinoViTDPT(backbone)
+
         self.freeze_backbone = freeze_backbone
         self.lr = lr
         self.weight_decay = weight_decay
@@ -27,8 +41,8 @@ class LitDinoModule(pl.LightningModule):
 
         # Metrics
         self.train_iou = MeanIoU(num_classes=2, include_background=False)
-        self.val_iou   = MeanIoU(num_classes=2, include_background=False)
-        self.test_iou  = MeanIoU(num_classes=2, include_background=False)
+        self.val_iou = MeanIoU(num_classes=2, include_background=False)
+        self.test_iou = MeanIoU(num_classes=2, include_background=False)
         self.test_dice = DiceScore(num_classes=2, include_background=False)
 
         # Freeze backbone if specified
@@ -44,14 +58,14 @@ class LitDinoModule(pl.LightningModule):
         for k, v in parts.items():
             self.log(f"loss/{k}", v, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
         return total
-    
+
     def _shared_step(self, batch, tta=False):
         x, y = batch
         logits = self(x)
-        if tta: # Test Time Augmentation (horizontal flip) for inference
+        if tta:  # Test Time Augmentation (horizontal flip) for inference
             x_flip = torch.flip(x, dims=[-1])
             logits = (logits + torch.flip(self(x_flip), dims=[-1])) / 2.0
-        loss  = self._loss(logits, y)
+        loss = self._loss(logits, y)
         preds = (torch.sigmoid(logits) > 0.5).int()
         return loss, preds.int(), y.int()
 
@@ -82,8 +96,7 @@ class LitDinoModule(pl.LightningModule):
         )
 
     def configure_optimizers(self):
-        head_params = list(self.model.encoder.input_adapter.parameters()) + \
-                      list(self.model.decoder.parameters()) + \
+        head_params = list(self.model.decoder.parameters()) + \
                       list(self.model.seg_head.parameters())
 
         if any(p.requires_grad for p in self.model.encoder.backbone.parameters()):

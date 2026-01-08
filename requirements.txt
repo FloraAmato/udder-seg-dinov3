@@ -8,3 +8,4 @@ torch-pruning
 torchmetrics
 segmentation-models-pytorch
 wandb
+timm>=1.0.20
