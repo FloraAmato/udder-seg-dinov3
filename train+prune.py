@@ -131,6 +131,12 @@ else:
 model = lit_prune.model
 model.eval().cpu()
 
+# IMPORTANT: Temporarily enable gradients on ALL parameters before pruning.
+# torch_pruning needs a traceable dependency graph to prune the encoder.
+# If encoder params have requires_grad=False, TP treats it as opaque and skips it.
+for p in model.parameters():
+    p.requires_grad = True
+
 imp = tp.importance.GroupMagnitudeImportance(p=2)  # L2 over grouped weights
 ignored_layers = [
     model.seg_head,
@@ -151,10 +157,8 @@ pruner = tp.pruner.BasePruner(
 pruner.step()  # Prune the graph
 log_macs_params(model, example_inputs, prune_logger)
 
-# Put the pruned module back; unfreeze to fine-tune everything
+# Put the pruned module back (gradients already enabled for fine-tuning)
 lit_prune.model = model
-for p in lit_prune.model.parameters():
-    p.requires_grad = True
 
 # Recreate the optimizer (shapes changed!)
 trainer = pl.Trainer(
