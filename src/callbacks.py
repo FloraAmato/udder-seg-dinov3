@@ -1,4 +1,4 @@
-from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor, EarlyStopping
+from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
 
 def get_callbacks(model_name: str, max_epochs: int, mode="train"):
     assert mode in ["train", "prune"]
@@ -17,11 +17,4 @@ def get_callbacks(model_name: str, max_epochs: int, mode="train"):
     lr_cb = LearningRateMonitor(
         logging_interval="epoch"
     )
-    es_cb = EarlyStopping(
-        monitor="val_iou",
-        patience=max_epochs // 10,
-        mode="max",
-        verbose=True,
-    )
-    return [ckpt_cb, lr_cb, es_cb]
-
+    return [ckpt_cb, lr_cb]
