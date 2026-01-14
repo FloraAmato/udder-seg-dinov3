@@ -1,10 +1,27 @@
 import cv2
 import albumentations as A
 
-def get_training_augmentation():
+def get_training_augmentation(use_augmentation=True):
     """
     Data augmentation pipeline for training.
+
+    Args:
+        use_augmentation: If False, only apply minimal transforms (pad + normalize)
     """
+    if not use_augmentation:
+        # No augmentation - only pad and normalize
+        train_transform = [
+            A.PadIfNeeded(
+                min_height=480,
+                min_width=640,
+                border_mode=cv2.BORDER_CONSTANT,
+                fill=0,
+                p=1.0
+            ),
+            A.Normalize(mean=0.0, std=1.0, max_pixel_value=255.0),
+        ]
+        return A.Compose(train_transform, additional_targets={"mask": "mask"})
+
     train_transform = [
         # 1) RandomResizedCrop directly to 480×640, but vary scale and aspect-ratio
         A.RandomResizedCrop(
@@ -24,7 +41,7 @@ def get_training_augmentation():
             contrast_limit=0.3,
             p=0.5
         ),
-        
+
         # 4) Blur/sharpen: apply one of GaussianBlur, MotionBlur, MedianBlur, or Sharpen
         A.OneOf([
             A.GaussianBlur(blur_limit=(3, 7), p=1.0),

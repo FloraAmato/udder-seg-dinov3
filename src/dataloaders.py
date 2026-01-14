@@ -4,11 +4,11 @@ from .augmentations import get_training_augmentation, get_validation_augmentatio
 from .dataset import UdderSegmentationDataset
 
 
-def get_dataloaders(train_images, train_masks, val_images, val_masks, test_images, test_masks, batch_size):
+def get_dataloaders(train_images, train_masks, val_images, val_masks, test_images, test_masks, batch_size, use_augmentation=True):
     train_ds = UdderSegmentationDataset(
         images_dir=train_images,
         masks_dir=train_masks,
-        augmentation=get_training_augmentation(),
+        augmentation=get_training_augmentation(use_augmentation=use_augmentation),
     )
     val_ds = UdderSegmentationDataset(
         images_dir=val_images,
