@@ -8,6 +8,7 @@ Ablation studies:
 3. Pruning ratio ablation (Small): r ∈ {0.1, 0.3, 0.5}
 4. Pretraining ablation (Small): DINOv3 vs DINOv2 vs ImageNet
 5. UNet baseline (ResNet-50)
+6. Lightweight backbone baselines (MobileNetV3, EfficientViT)
 """
 
 import os
@@ -22,6 +23,7 @@ from src.dataloaders import get_dataloaders
 from src.dinov3_backbone import get_convnext_features_backbone, get_vit_backbone
 from src.lit_dino import LitDinoModule
 from src.lit_unet import LitUNetModule
+from src.lit_lightweight import LitLightweightModule
 from src.logger import get_loggers, log_macs_params
 from src.loss import get_segmentation_loss
 from src.onnx_export import export_onnx
@@ -271,6 +273,70 @@ def train_unet_baseline():
     wandb.finish()
 
 
+def train_lightweight_baseline(encoder_type: str):
+    """
+    Train a lightweight backbone baseline.
+
+    Args:
+        encoder_type: One of "mobilenetv3", "efficientvit", "mobilenetv2"
+    """
+    print(f"\n{'='*60}")
+    print(f"Running: {encoder_type.upper()} + FPN Baseline")
+    print(f"{'='*60}\n")
+
+    loss = get_segmentation_loss(
+        bce=1.0, dice=1.0, tversky=0.0, lovasz=0.0, focal=1.0, ignore_index=None
+    )
+
+    train_loader, val_loader, test_loader = get_dataloaders(
+        TRAIN_IMAGES, TRAIN_MASKS,
+        VAL_IMAGES, VAL_MASKS,
+        TEST_IMAGES, TEST_MASKS,
+        BATCH_SIZE,
+        use_augmentation=True
+    )
+
+    model_name = f"{encoder_type}_fpn"
+    train_logger, _ = get_loggers(
+        model_name=model_name,
+        project_name=PROJECT_NAME + "_ablations",
+        wandb_offline=WANDB_OFFLINE
+    )
+
+    lit_model = LitLightweightModule(
+        encoder_type=encoder_type,
+        loss=loss,
+        in_channels=IN_CHANS,
+        lr=1e-3,
+        weight_decay=WEIGHT_DECAY,
+        warmup_ratio=WARMUP_RATIO
+    )
+
+    trainer = pl.Trainer(
+        max_epochs=MAX_EPOCHS,
+        accelerator="gpu" if torch.cuda.is_available() else "cpu",
+        devices=-1,
+        precision=32,
+        gradient_clip_val=1.0,
+        callbacks=get_callbacks(model_name=model_name, max_epochs=MAX_EPOCHS, mode="train"),
+        logger=train_logger,
+    )
+    trainer.fit(lit_model, train_loader, val_loader)
+
+    example_inputs = torch.randn(1, IN_CHANS, 480, 640)
+    log_macs_params(lit_model.model, example_inputs, train_logger)
+
+    best_ckpt = trainer.checkpoint_callback.best_model_path
+    lit_test = LitLightweightModule.load_from_checkpoint(
+        best_ckpt, encoder_type=encoder_type, loss=loss, in_channels=IN_CHANS
+    )
+
+    torch.save(lit_test.model.state_dict(), f"checkpoints/{model_name}/best.pt")
+    export_onnx(lit_test.model.cpu(), example_inputs, model_name)
+    trainer.test(lit_test, test_loader)
+    wandb.finish()
+
+
 if __name__ == "__main__":
     # Base model for ablations
     BASE_MODEL = "convnext_small.dinov3_lvd1689m"
@@ -354,6 +420,14 @@ if __name__ == "__main__":
     # =========================================================================
     print("\n>>> BASELINE: UNet ResNet-50")
     train_unet_baseline()
+
+    # =========================================================================
+    # 6. Lightweight backbone baselines
+    # =========================================================================
+    print("\n>>> BASELINES: Lightweight Backbones")
+
+    for encoder in ["mobilenetv3", "efficientvit"]:
+        train_lightweight_baseline(encoder)
 
     print("\n" + "="*80)
     print("ALL ABLATION STUDIES COMPLETED!")
